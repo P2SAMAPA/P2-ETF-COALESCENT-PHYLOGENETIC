@@ -2,7 +2,6 @@ import os
 import json
 from datetime import datetime
 import numpy as np
-import pandas as pd
 from huggingface_hub import HfApi
 import config
 import data_manager as dm
@@ -43,8 +42,7 @@ def main():
         "windows": config.WINDOWS,
         "distance_metric": config.DISTANCE_METRIC,
         "linkage_method": config.LINKAGE_METHOD,
-        "best_universes": {},      # for Tab1: best window per universe
-        "all_universes": {}        # for Tab2: all windows data
+        "universes": {}
     }
     for uni_name in config.UNIVERSES.keys():
         print(f"Processing {uni_name}...")
@@ -52,37 +50,29 @@ def main():
         if returns.empty:
             print("  No data -> skipping")
             continue
-        per_window = []
+        all_window_results = []
+        best_score = -np.inf
+        best_window = None
+        best_data = None
         for w in config.WINDOWS:
             print(f"  Window {w} days")
             out = run_for_window(returns, w)
             if out:
-                per_window.append(out)
+                all_window_results.append(out)
+                # Determine best window (largest max absolute raw score)
+                max_abs = max(abs(v) for v in out["all_scores_raw"].values())
+                if max_abs > best_score:
+                    best_score = max_abs
+                    best_window = w
+                    best_data = out
             else:
                 print(f"    Failed for window {w}")
-        # Store all windows data for Tab2
-        results["all_universes"][uni_name] = per_window
-        # Select best window for Tab1 (highest max absolute raw score)
-        best = None
-        best_score = -np.inf
-        best_data = None
-        for pw in per_window:
-            max_abs = max(abs(v) for v in pw["all_scores_raw"].values())
-            if max_abs > best_score:
-                best_score = max_abs
-                best = pw["window"]
-                best_data = pw
-        if best_data:
-            results["best_universes"][uni_name] = {
-                "best_window": best,
-                "best_window_data": {
-                    "top_etfs": best_data["top_etfs"],
-                    "all_scores_norm": best_data["all_scores_norm"],
-                    "all_scores_raw": best_data["all_scores_raw"]
-                }
-            }
-        else:
-            results["best_universes"][uni_name] = None
+        # Store both all windows and best window data
+        results["universes"][uni_name] = {
+            "best_window": best_window,
+            "best_window_data": best_data,
+            "all_windows": all_window_results
+        }
     os.makedirs("output", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_file = f"output/coalescent_{timestamp}.json"
