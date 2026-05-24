@@ -43,7 +43,8 @@ def main():
         "windows": config.WINDOWS,
         "distance_metric": config.DISTANCE_METRIC,
         "linkage_method": config.LINKAGE_METHOD,
-        "universes": {}
+        "best_universes": {},      # for Tab1: best window per universe
+        "all_universes": {}        # for Tab2: all windows data
     }
     for uni_name in config.UNIVERSES.keys():
         print(f"Processing {uni_name}...")
@@ -59,7 +60,9 @@ def main():
                 per_window.append(out)
             else:
                 print(f"    Failed for window {w}")
-        # Select best window = one with highest max absolute raw score
+        # Store all windows data for Tab2
+        results["all_universes"][uni_name] = per_window
+        # Select best window for Tab1 (highest max absolute raw score)
         best = None
         best_score = -np.inf
         best_data = None
@@ -70,7 +73,7 @@ def main():
                 best = pw["window"]
                 best_data = pw
         if best_data:
-            results["universes"][uni_name] = {
+            results["best_universes"][uni_name] = {
                 "best_window": best,
                 "best_window_data": {
                     "top_etfs": best_data["top_etfs"],
@@ -79,7 +82,7 @@ def main():
                 }
             }
         else:
-            results["universes"][uni_name] = None
+            results["best_universes"][uni_name] = None
     os.makedirs("output", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_file = f"output/coalescent_{timestamp}.json"
