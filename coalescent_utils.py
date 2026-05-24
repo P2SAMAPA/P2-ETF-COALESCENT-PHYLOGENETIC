@@ -3,11 +3,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, cophenet
 
 def distance_matrix(returns, metric="correlation"):
-    """
-    Compute pairwise distance between ETFs.
-    metric: 'correlation' (1 - Pearson correlation) or 'euclidean' on standardized returns.
-    Returns condensed distance matrix (pdist format).
-    """
+    """Return condensed distance matrix."""
     if metric == "correlation":
         corr = returns.corr().fillna(0)
         dist = 1 - corr
@@ -21,22 +17,21 @@ def distance_matrix(returns, metric="correlation"):
     return condensed
 
 def compute_coalescent_scores(returns, metric="correlation", linkage_method="average"):
-    """
-    Build UPGMA tree from distance matrix, compute cophenetic distances,
-    and return for each ETF the average distance to all others (divergence score).
-    """
-    returns_clean = returns.dropna()
+    # Clean data: drop rows with any NaN, then drop columns with any NaN
+    returns_clean = returns.dropna(axis=0, how='any')
+    returns_clean = returns_clean.dropna(axis=1, how='any')
     n = returns_clean.shape[1]
-    if returns_clean.shape[0] < n:
-        # Not enough data: return zeros
+    if n < 3:
+        # Not enough assets to build a meaningful tree
         return {t: 0.0 for t in returns_clean.columns}
-    condensed_dist = distance_matrix(returns_clean, metric=metric)
-    Z = linkage(condensed_dist, method=linkage_method, metric='precomputed')
-    # Cophenetic distance matrix (full squareform)
-    cophenet_dist, _ = cophenet(Z, condensed_dist)
-    # Convert to square form
-    cophenet_square = squareform(cophenet_dist)
-    # For each leaf, average distance to all other leaves
-    scores = np.mean(cophenet_square, axis=1)
-    tickers = returns_clean.columns
-    return {ticker: scores[i] for i, ticker in enumerate(tickers)}
+    try:
+        condensed_dist = distance_matrix(returns_clean, metric=metric)
+        Z = linkage(condensed_dist, method=linkage_method, metric='precomputed')
+        cophenet_dist, _ = cophenet(Z, condensed_dist)
+        cophenet_square = squareform(cophenet_dist)
+        scores = np.mean(cophenet_square, axis=1)
+        tickers = returns_clean.columns
+        return {ticker: scores[i] for i, ticker in enumerate(tickers)}
+    except Exception as e:
+        print(f"    Warning: coalescent failed ({e}), returning zeros")
+        return {t: 0.0 for t in returns_clean.columns}
