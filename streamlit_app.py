@@ -86,81 +86,84 @@ if "error" in data:
 
 st.session_state['run_date'] = data['run_date']
 
-# Create two tabs
-tab1, tab2 = st.tabs(["📌 Best Window per Universe", "🔍 Explore Any Window"])
+# ---- Helper function to display a single universe's results ----
+def display_universe(universe_name, uni_data, window_mode="best", selected_window=None):
+    """
+    window_mode: "best" or "manual"
+    If manual, selected_window must be an integer.
+    """
+    if not uni_data:
+        st.warning(f"No data for {universe_name}")
+        return
+    if window_mode == "best":
+        win = uni_data["best_window"]
+        win_data = uni_data["best_window_data"]
+        if win_data is None:
+            st.warning(f"No best window data for {universe_name}")
+            return
+        top3 = win_data["top_etfs"]
+        norm_scores = win_data["all_scores_norm"]
+        raw_scores = win_data["all_scores_raw"]
+        st.markdown(f'<h2 style="font-size: 1.8rem; margin-top: 1rem;">{universe_name.replace("_", " ").title()} <span style="font-size: 0.9rem; background: #e0e0e0; padding: 0.2rem 0.8rem; border-radius: 20px;">best window {win}d</span></h2>', unsafe_allow_html=True)
+    else:  # manual
+        # find the data for the selected window
+        win_data = None
+        for wd in uni_data["all_windows"]:
+            if wd["window"] == selected_window:
+                win_data = wd
+                break
+        if win_data is None:
+            st.warning(f"No data for window {selected_window} in {universe_name}")
+            return
+        top3 = win_data["top_etfs"]
+        norm_scores = win_data["all_scores_norm"]
+        raw_scores = win_data["all_scores_raw"]
+        st.markdown(f'<h2 style="font-size: 1.8rem; margin-top: 1rem;">{universe_name.replace("_", " ").title()} <span style="font-size: 0.9rem; background: #e0e0e0; padding: 0.2rem 0.8rem; border-radius: 20px;">window {selected_window}d</span></h2>', unsafe_allow_html=True)
+    # Display top 3 hero cards
+    cols = st.columns(3)
+    for idx, etf in enumerate(top3):
+        with cols[idx]:
+            st.markdown(f"""
+            <div class="hero-card">
+                <h3>{etf['ticker']}</h3>
+                <p>Divergence score: {etf['coalescent_score_norm']:.3f}</p>
+                <p style="font-size:0.9rem;">raw: {etf['raw_score']:.4f}</p>
+            </div>
+            """, unsafe_allow_html=True)
+    # Full ranking expander
+    with st.expander(f"Full ranking for {universe_name}"):
+        df_full = pd.DataFrame(list(norm_scores.items()), columns=["Ticker", "Normalized Score"])
+        df_full["Raw Score"] = df_full["Ticker"].apply(lambda t: raw_scores[t])
+        df_full = df_full.sort_values("Normalized Score", ascending=False)
+        st.dataframe(df_full, use_container_width=True)
+
+# ---- Main Tabs ----
+tab1, tab2 = st.tabs(["📊 Best Window (Auto)", "🔍 Choose Window (Manual)"])
 
 with tab1:
-    st.header("🌿 Top ETFs by Phylogenetic Divergence (Best Window)")
+    st.header("🌿 Top ETFs by Phylogenetic Divergence (Automatic Best Window)")
     with st.expander("📖 Interpretation", expanded=False):
         st.markdown("""
-        - **Kingman coalescent** models the genealogical tree backwards in time.
-        - Each ETF's return trajectory is treated as a genetic sequence.
-        - Tree built using UPGMA from a distance matrix (1‑|correlation|).
-        - The **divergence score** is the total branch length from root to leaf – a measure of evolutionary uniqueness.
+        - **Kingman coalescent** models the genealogical tree of a population backwards in time.
+        - Each ETF is an "individual" and its return trajectory is a genetic sequence.
+        - UPGMA tree from distance matrix (1 - |correlation| or Euclidean on standardised returns).
+        - **Divergence score** = average cophenetic distance from the ETF to all others – measure of evolutionary distinctiveness.
+        - Higher score = ETF has followed a more unique path.
         - The best window per universe is automatically selected (largest absolute raw score among all ETFs).
         """)
-    for universe_name, uni_data in data["best_universes"].items():
-        if not uni_data:
-            continue
-        best_win = uni_data["best_window"]
-        best_data = uni_data["best_window_data"]
-        top3 = best_data["top_etfs"]
-        st.markdown(f'<h2 style="font-size: 1.8rem; margin-top: 1rem;">{universe_name.replace("_", " ").title()} <span style="font-size: 0.9rem; background: #e0e0e0; padding: 0.2rem 0.8rem; border-radius: 20px;">best window {best_win}d</span></h2>', unsafe_allow_html=True)
-        cols = st.columns(3)
-        for idx, etf in enumerate(top3):
-            with cols[idx]:
-                st.markdown(f"""
-                <div class="hero-card">
-                    <h3>{etf['ticker']}</h3>
-                    <p>Divergence score: {etf['coalescent_score_norm']:.3f}</p>
-                    <p style="font-size:0.9rem;">raw: {etf['raw_score']:.4f}</p>
-                </div>
-                """, unsafe_allow_html=True)
-        with st.expander(f"Full ranking for {universe_name}"):
-            norm_scores = best_data["all_scores_norm"]
-            raw_scores = best_data["all_scores_raw"]
-            df_full = pd.DataFrame(list(norm_scores.items()), columns=["Ticker", "Normalized Score"])
-            df_full["Raw Score"] = df_full["Ticker"].apply(lambda t: raw_scores[t])
-            df_full = df_full.sort_values("Normalized Score", ascending=False)
-            st.dataframe(df_full, use_container_width=True)
+    for universe_name, uni_data in data["universes"].items():
+        display_universe(universe_name, uni_data, window_mode="best")
 
 with tab2:
-    st.header("🔍 Explore Any Window")
-    with st.expander("📖 How to use", expanded=False):
-        st.markdown("""
-        - Select a universe and a rolling window from the dropdowns.
-        - The top 3 ETFs by normalized divergence score will be displayed.
-        - Expand the table to see full ranking.
-        """)
-    # For each universe, provide dropdowns to select window
-    for universe_name in config.UNIVERSES.keys():
-        if universe_name not in data["all_universes"] or not data["all_universes"][universe_name]:
+    st.header("🔍 Manual Window Selection")
+    st.markdown("Choose a rolling window for each universe to inspect its phylogenetic divergence scores.")
+    for universe_name, uni_data in data["universes"].items():
+        if not uni_data or not uni_data.get("all_windows"):
+            st.warning(f"No window data for {universe_name}")
             continue
-        st.markdown(f"### {universe_name.replace('_', ' ').title()}")
-        # Get list of available windows for this universe
-        windows_data = data["all_universes"][universe_name]
-        window_options = {wdata["window"]: wdata for wdata in windows_data}
-        selected_win = st.selectbox(f"Select window for {universe_name}", options=list(window_options.keys()), key=f"tab2_{universe_name}")
-        win_data = window_options[selected_win]
-        top3 = win_data["top_etfs"]
-        cols = st.columns(3)
-        for idx, etf in enumerate(top3):
-            with cols[idx]:
-                st.markdown(f"""
-                <div class="hero-card">
-                    <h3>{etf['ticker']}</h3>
-                    <p>Divergence score: {etf['coalescent_score_norm']:.3f}</p>
-                    <p style="font-size:0.9rem;">raw: {etf['raw_score']:.4f}</p>
-                </div>
-                """, unsafe_allow_html=True)
-        with st.expander(f"Full ranking for {universe_name} (window {selected_win}d)"):
-            norm_scores = win_data["all_scores_norm"]
-            raw_scores = win_data["all_scores_raw"]
-            df_full = pd.DataFrame(list(norm_scores.items()), columns=["Ticker", "Normalized Score"])
-            df_full["Raw Score"] = df_full["Ticker"].apply(lambda t: raw_scores[t])
-            df_full = df_full.sort_values("Normalized Score", ascending=False)
-            st.dataframe(df_full, use_container_width=True)
-        st.markdown("---")
+        available_windows = [wd["window"] for wd in uni_data["all_windows"]]
+        sel_win = st.selectbox(f"Window for {universe_name.replace('_', ' ').title()}", available_windows, key=f"manual_{universe_name}")
+        display_universe(universe_name, uni_data, window_mode="manual", selected_window=sel_win)
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Coalescent Phylogenetic | Kingman coalescent tree on ETF return paths")
