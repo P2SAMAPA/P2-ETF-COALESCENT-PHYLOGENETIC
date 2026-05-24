@@ -1,37 +1,31 @@
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
-from scipy.cluster.hierarchy import linkage, cophenet
-
-def distance_matrix(returns, metric="correlation"):
-    """Return condensed distance matrix."""
-    if metric == "correlation":
-        corr = returns.corr().fillna(0)
-        dist = 1 - corr
-        np.fill_diagonal(dist.values, 0)
-        condensed = squareform(dist.values, checks=False)
-    elif metric == "euclidean":
-        standardized = (returns - returns.mean()) / returns.std()
-        condensed = pdist(standardized.T, metric='euclidean')
-    else:
-        raise ValueError(f"Unknown metric: {metric}")
-    return condensed
 
 def compute_coalescent_scores(returns, metric="correlation", linkage_method="average"):
-    # Clean data: drop rows with any NaN, then drop columns with any NaN
+    """
+    Compute divergence score as the average pairwise distance from each ETF to all others.
+    This is a robust proxy for tree-based cophenetic distance.
+    """
     returns_clean = returns.dropna(axis=0, how='any')
     returns_clean = returns_clean.dropna(axis=1, how='any')
     n = returns_clean.shape[1]
     if n < 3:
-        # Not enough assets to build a meaningful tree
         return {t: 0.0 for t in returns_clean.columns}
     try:
-        condensed_dist = distance_matrix(returns_clean, metric=metric)
-        Z = linkage(condensed_dist, method=linkage_method, metric='precomputed')
-        cophenet_dist, _ = cophenet(Z, condensed_dist)
-        cophenet_square = squareform(cophenet_dist)
-        scores = np.mean(cophenet_square, axis=1)
+        if metric == "correlation":
+            corr = returns_clean.corr().fillna(0)
+            dist = 1 - corr
+            np.fill_diagonal(dist.values, 0)
+            # Average distance from each ETF to all others
+            avg_dist = dist.mean(axis=1).values
+        elif metric == "euclidean":
+            standardized = (returns_clean - returns_clean.mean()) / returns_clean.std()
+            dist_matrix = squareform(pdist(standardized.T, metric='euclidean'))
+            avg_dist = np.mean(dist_matrix, axis=1)
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
         tickers = returns_clean.columns
-        return {ticker: scores[i] for i, ticker in enumerate(tickers)}
+        return {ticker: avg_dist[i] for i, ticker in enumerate(tickers)}
     except Exception as e:
         print(f"    Warning: coalescent failed ({e}), returning zeros")
         return {t: 0.0 for t in returns_clean.columns}
